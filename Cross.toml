@@ -1,0 +1,6 @@
+# Cross.toml - 交叉编译配置
+# 解决 boring-sys2 (BoringSSL) 在 cross 容器内使用错误架构编译器的问题
+
+[target.aarch64-unknown-linux-gnu]
+# 使用自定义 Dockerfile 确保 cmake 和 g++ 可用
+dockerfile = "cross/Dockerfile.aarch64"
