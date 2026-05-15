@@ -204,27 +204,60 @@ impl HTTPDownloader {
     }
 
     async fn get_file_size(&self, url: &str) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+        // Try HEAD first
+        if let Ok(response) = self.client.head(url).send().await {
+            if response.status().is_success() {
+                if let Some(content_length) = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<i64>().ok())
+                {
+                    if content_length > 0 {
+                        return Ok(content_length);
+                    }
+                }
+            }
+        }
+
+        // HEAD failed or returned no Content-Length, fall back to GET with Range bytes=0-0
         let response = self.client
-            .head(url)
+            .get(url)
+            .header(reqwest::header::RANGE, "bytes=0-0")
             .send()
             .await?;
 
         if !response.status().is_success() {
-            return Err(format!("HEAD failed: {}", response.status()).into());
+            return Err(format!("Failed to get file size: {}", response.status()).into());
         }
 
-        let content_length = response
+        if let Some(content_length) = response
+            .headers()
+            .get("content-range")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| {
+                // content-range: bytes 0-0/12345
+                s.split('/').last().and_then(|total| total.parse::<i64>().ok())
+            })
+        {
+            if content_length > 0 {
+                return Ok(content_length);
+            }
+        }
+
+        // Last resort: use Content-Length from GET response (for non-range responses)
+        if let Some(content_length) = response
             .headers()
             .get(reqwest::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<i64>().ok())
-            .ok_or_else(|| "Invalid content length")?;
-
-        if content_length <= 0 {
-            return Err("Invalid content length".into());
+        {
+            if content_length > 0 {
+                return Ok(content_length);
+            }
         }
 
-        Ok(content_length)
+        Err("Unable to determine file size".into())
     }
 
     fn create_chunks(file_size: i64, chunk_size: i64, thread_count: usize) -> Vec<DownloadChunk> {
