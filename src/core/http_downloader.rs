@@ -204,26 +204,7 @@ impl HTTPDownloader {
     }
 
     async fn get_file_size(&self, url: &str) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
-        // Try HEAD first
-        if let Ok(response) = self.client.head(url).send().await {
-            if response.status().is_success() {
-                if let Some(content_length) = response
-                    .headers()
-                    .get(reqwest::header::CONTENT_LENGTH)
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<i64>().ok())
-                {
-                    if content_length > 0 {
-                        return Ok(content_length);
-                    }
-                }
-            }
-        }
-
-        // HEAD failed — wait before fallback to avoid rate-limit
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
-        // Fall back to GET with Range bytes=0-0
+        // Use GET bytes=0-0 first (HEAD is often blocked by CDNs / returns 429)
         let response = self.client
             .get(url)
             .header(reqwest::header::RANGE, "bytes=0-0")
@@ -234,21 +215,19 @@ impl HTTPDownloader {
             return Err(format!("Failed to get file size: {}", response.status()).into());
         }
 
+        // Prefer Content-Range header (from Range response)
         if let Some(content_length) = response
             .headers()
             .get("content-range")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| {
-                // content-range: bytes 0-0/12345
-                s.split('/').last().and_then(|total| total.parse::<i64>().ok())
-            })
+            .and_then(|s| s.split('/').last().and_then(|total| total.parse::<i64>().ok()))
         {
             if content_length > 0 {
                 return Ok(content_length);
             }
         }
 
-        // Last resort: use Content-Length from GET response (for non-range responses)
+        // Fallback: Content-Length header
         if let Some(content_length) = response
             .headers()
             .get(reqwest::header::CONTENT_LENGTH)
