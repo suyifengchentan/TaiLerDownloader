@@ -208,6 +208,7 @@ impl HTTPDownloader {
         let response = self.client
             .get(url)
             .header(reqwest::header::RANGE, "bytes=0-0")
+            .header(reqwest::header::USER_AGENT, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
             .send()
             .await?;
 
