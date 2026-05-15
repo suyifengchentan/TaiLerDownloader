@@ -18,10 +18,13 @@ const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// Global HTTP client connection pool (shared by all HTTPDownloader instances)
 static GLOBAL_HTTP_CLIENT: tokio::sync::OnceCell<Client> = tokio::sync::OnceCell::const_new();
 
-/// Get global reusable HTTP Client
+/// Get global reusable HTTP Client (with Chrome TLS fingerprint emulation)
 async fn get_global_client() -> Client {
     GLOBAL_HTTP_CLIENT.get_or_init(|| async {
+        use wreq_util::Emulation;
+
         Client::builder()
+            .emulation(Emulation::Chrome133)
             .connect_timeout(Duration::from_secs(15))
             .pool_idle_timeout(Duration::from_secs(90))
             .pool_max_idle_per_host(32)
