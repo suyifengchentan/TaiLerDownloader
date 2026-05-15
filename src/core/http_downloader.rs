@@ -216,8 +216,9 @@ impl HTTPDownloader {
             .await?;
 
         if !response.status().is_success() {
+            let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Failed to get file size: {} — body: {}", response.status(), if body.len() > 300 { body[..300].to_string() } else { body }).into());
+            return Err(format!("Failed to get file size: {} — body: {}", status, if body.len() > 300 { body[..300].to_string() } else { body }).into());
         }
 
         // Prefer Content-Range header (from Range response)
