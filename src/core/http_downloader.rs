@@ -502,7 +502,7 @@ impl Downloader for HTTPDownloader {
         let mut join_set = tokio::task::JoinSet::new();
         let mut active_count = 0usize;
 
-        for worker in &workers {
+        for (i, worker) in workers.iter().enumerate() {
             let task_clone = task.clone();
             let downloaded_size_clone = downloaded_size.clone();
             let self_clone = self.clone_downloader();
@@ -517,6 +517,12 @@ impl Downloader for HTTPDownloader {
                 ).await
             });
             active_count += 1;
+
+            // Stagger initial requests to avoid 429 rate-limit from servers
+            if i > 0 && i < workers.len() - 1 {
+                let stagger_ms = (50_f64 * (1.0 + (i as f64 / workers.len() as f64) * 4.0)) as u64;
+                tokio::time::sleep(std::time::Duration::from_millis(stagger_ms)).await;
+            }
         }
 
         // Dynamic splitting: when one worker completes, find the largest remaining worker and split it
