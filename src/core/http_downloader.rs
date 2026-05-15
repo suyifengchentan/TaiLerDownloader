@@ -220,7 +220,10 @@ impl HTTPDownloader {
             }
         }
 
-        // HEAD failed or returned no Content-Length, fall back to GET with Range bytes=0-0
+        // HEAD failed — wait before fallback to avoid rate-limit
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Fall back to GET with Range bytes=0-0
         let response = self.client
             .get(url)
             .header(reqwest::header::RANGE, "bytes=0-0")
