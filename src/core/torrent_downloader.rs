@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use librqbit::{AddTorrent, AddTorrentOptions, Session};
+use librqbit::{AddTorrent, AddTorrentOptions, Session, SessionOptions};
 
 use super::downloader::{DownloadConfig, DownloadTask};
 use super::downloader_interface::{BaseDownloader, Downloader};
@@ -53,24 +53,55 @@ impl Downloader for TorrentDownloader {
         } else {
             Vec::new()
         };
+        let tracker_count = trackers.len();
 
-        // Create librqbit Session
-        let session = Session::new(output_dir)
-            .await
-            .map_err(|e| format!("Failed to create BT Session: {}", e))?;
-
-        // Build AddTorrent parameters
-        let add_torrent = if task.url.starts_with("magnet:") {
-            AddTorrent::from_url(&task.url)
-        } else if task.url.ends_with(".torrent") {
-            // .torrent file URL - first download file content
-            AddTorrent::from_url(&task.url)
-        } else {
-            return Err(format!("Unsupported BT URL format: {}", task.url).into());
+        let mut session_opts = SessionOptions {
+            disable_dht_persistence: true,
+            listen_port_range: Some(6881..6891),
+            ..Default::default()
         };
+
+        if !trackers.is_empty() {
+            eprintln!(
+                "BT using {} configured tracker(s); DHT persistence disabled",
+                tracker_count
+            );
+        }
+
+        // Create librqbit Session. Persistent DHT can fail on some Windows setups,
+        // so use a non-persistent DHT first and fall back to tracker-only mode.
+        let session = match Session::new_with_opts(output_dir.clone(), session_opts).await {
+            Ok(session) => session,
+            Err(err) => {
+                eprintln!(
+                    "BT session init with DHT failed: {:#}. Falling back to tracker-only mode.",
+                    err
+                );
+                session_opts = SessionOptions {
+                    disable_dht: true,
+                    disable_dht_persistence: true,
+                    listen_port_range: Some(6881..6891),
+                    ..Default::default()
+                };
+                Session::new_with_opts(output_dir, session_opts)
+                    .await
+                    .map_err(|fallback_err| {
+                        format!(
+                            "Failed to create BT Session: primary init error: {:#}; fallback error: {:#}",
+                            err, fallback_err
+                        )
+                    })?
+            }
+        };
+
+        // Build AddTorrent parameters. This accepts magnet/http(s) URLs and local
+        // .torrent files via the same path.
+        let add_torrent = AddTorrent::from_cli_argument(&task.url)
+            .map_err(|e| format!("Unsupported BT input {}: {}", task.url, e))?;
 
         // Add torrent and start download
         let opts = AddTorrentOptions {
+            overwrite: true,
             trackers: if trackers.is_empty() {
                 None
             } else {
@@ -96,16 +127,59 @@ impl Downloader for TorrentDownloader {
             }
         };
 
+        if let Ok((name, total_bytes)) = handle.with_metadata(|metadata| {
+            (
+                metadata
+                    .info
+                    .name
+                    .as_deref()
+                    .map(|name| String::from_utf8_lossy(name).into_owned())
+                    .unwrap_or_else(|| "<unknown>".to_string()),
+                metadata.info.length.unwrap_or(0),
+            )
+        }) {
+            eprintln!(
+                "BT metadata ready: {} ({} bytes), {} extra tracker(s)",
+                name,
+                total_bytes,
+                tracker_count
+            );
+        }
+
         eprintln!("BT download started, waiting for completion...");
 
         // Poll for download completion
         let mut last_reported_bytes: u64 = 0;
+        let mut tick: u64 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tick += 1;
 
             let stats = handle.stats();
             let downloaded = stats.progress_bytes;
             let total = stats.total_bytes;
+
+            if tick == 1 || tick % 10 == 0 {
+                if let Some(live) = &stats.live {
+                    let peers = &live.snapshot.peer_stats;
+                    eprintln!(
+                        "BT status: {} | peers seen={} queued={} connecting={} live={} dead={} | downloaded={}/{}",
+                        stats.state,
+                        peers.seen,
+                        peers.queued,
+                        peers.connecting,
+                        peers.live,
+                        peers.dead,
+                        downloaded,
+                        total
+                    );
+                } else {
+                    eprintln!(
+                        "BT status: {} | downloaded={}/{}",
+                        stats.state, downloaded, total
+                    );
+                }
+            }
 
             // Update progress
             if let Some(ref monitor) = self.monitor {
