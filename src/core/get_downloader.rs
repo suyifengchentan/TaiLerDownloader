@@ -1,21 +1,21 @@
-use std::sync::Arc;
-use tokio::sync::RwLock;
 use super::downloader::DownloadConfig;
 use super::downloader_interface::Downloader;
 use super::http_downloader::HTTPDownloader;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-#[cfg(feature = "ftp")]
-use super::ftp_downloader::FTPDownloader;
-#[cfg(feature = "torrent")]
-use super::torrent_downloader::TorrentDownloader;
-#[cfg(feature = "metalink")]
-use super::metalink_downloader::MetalinkDownloader;
 #[cfg(feature = "ed2k")]
 use super::ed2k_downloader::ED2KDownloader;
+#[cfg(feature = "ftp")]
+use super::ftp_downloader::FTPDownloader;
 #[cfg(feature = "http3")]
 use super::http3_downloader::HTTP3Downloader;
+#[cfg(feature = "metalink")]
+use super::metalink_downloader::MetalinkDownloader;
 #[cfg(feature = "sftp")]
 use super::sftp_downloader::SFTPDownloader;
+#[cfg(feature = "torrent")]
+use super::torrent_downloader::TorrentDownloader;
 
 /// Downloader factory function
 /// Automatically routes to the appropriate downloader implementation based on URL scheme
@@ -28,14 +28,10 @@ use super::sftp_downloader::SFTPDownloader;
 /// - `sftp://`             -> SFTPDownloader
 /// - `magnet:?`            -> TorrentDownloader (BT/DHT/Magnet)
 /// - `ed2k://`             -> ED2KDownloader
-pub async fn get_downloader(
-    config: Arc<RwLock<DownloadConfig>>,
-) -> Box<dyn Downloader> {
+pub async fn get_downloader(config: Arc<RwLock<DownloadConfig>>) -> Box<dyn Downloader> {
     let url = {
         let cfg = config.read().await;
-        cfg.tasks.first()
-           .map(|t| t.url.clone())
-           .unwrap_or_default()
+        cfg.tasks.first().map(|t| t.url.clone()).unwrap_or_default()
     };
 
     let scheme = detect_scheme(&url);
@@ -62,7 +58,10 @@ pub async fn get_downloader(
         #[cfg(feature = "sftp")]
         Protocol::Sftp => Box::new(SFTPDownloader::new(config).await),
         _ => {
-            eprintln!("Warning: Unknown protocol '{}', falling back to HTTP download", url.split("://").next().unwrap_or("unknown"));
+            eprintln!(
+                "Warning: Unknown protocol '{}', falling back to HTTP download",
+                url.split("://").next().unwrap_or("unknown")
+            );
             Box::new(HTTPDownloader::new(config).await)
         }
     }

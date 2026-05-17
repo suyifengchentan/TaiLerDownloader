@@ -1,15 +1,18 @@
-use std::time::Instant;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-#[cfg(feature = "websocket")]
-use super::websocket_client::WebSocketClient;
+use super::downloader::{DownloadChunk, DownloadConfig, DownloadTask};
 #[cfg(feature = "socket")]
 use super::socket_client::SocketClient;
-use super::downloader::{DownloadChunk, DownloadConfig, DownloadTask};
+#[cfg(feature = "websocket")]
+use super::websocket_client::WebSocketClient;
+use std::sync::Arc;
+use std::time::Instant;
+use tokio::sync::RwLock;
 
 #[async_trait::async_trait]
 pub trait Downloader: Send + Sync {
-    async fn download(&mut self, task: &DownloadTask) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn download(
+        &mut self,
+        task: &DownloadTask,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     fn get_type(&self) -> String;
     async fn cancel(&mut self, downloader: Box<dyn Downloader>);
     async fn get_snapshot(&self) -> Option<Box<dyn std::any::Any>>;

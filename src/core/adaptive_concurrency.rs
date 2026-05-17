@@ -1,7 +1,7 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 use tokio::sync::RwLock;
-use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
 
 pub struct AdaptiveConcurrency {
     min_threads: Arc<AtomicUsize>,
@@ -62,19 +62,23 @@ impl AdaptiveConcurrency {
             }
 
             let target = self.target_speed_bps.load(Ordering::Relaxed) as f64;
-            let avg_speed = history.iter()
-                .map(|(_, s)| s)
-                .sum::<f64>() / history.len() as f64;
+            let avg_speed = history.iter().map(|(_, s)| s).sum::<f64>() / history.len() as f64;
 
             let current = self.current_threads.load(Ordering::Relaxed);
 
             if target > 0.0 && avg_speed < target * 0.8 && self.should_increase() {
                 self.current_threads.fetch_add(1, Ordering::Relaxed);
                 self.stagnation_count.store(0, Ordering::Relaxed);
-            } else if avg_speed > target * 1.2 && self.should_decrease() && current > self.min_threads.load(Ordering::Relaxed) {
+            } else if avg_speed > target * 1.2
+                && self.should_decrease()
+                && current > self.min_threads.load(Ordering::Relaxed)
+            {
                 self.current_threads.fetch_sub(1, Ordering::Relaxed);
                 self.stagnation_count.store(0, Ordering::Relaxed);
-            } else if (target == 0.0 || avg_speed >= target) && self.stagnation_count.load(Ordering::Relaxed) > 3 && self.should_decrease() {
+            } else if (target == 0.0 || avg_speed >= target)
+                && self.stagnation_count.load(Ordering::Relaxed) > 3
+                && self.should_decrease()
+            {
                 self.current_threads.fetch_sub(1, Ordering::Relaxed);
             } else {
                 self.stagnation_count.fetch_add(1, Ordering::Relaxed);

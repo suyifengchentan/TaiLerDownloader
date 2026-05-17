@@ -1,14 +1,14 @@
 #![cfg(feature = "http3")]
 
-use std::sync::Arc;
-use std::net::SocketAddr;
-use tokio::sync::RwLock;
 use bytes::Buf;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-use super::downloader_interface::{Downloader, BaseDownloader};
-use super::downloader::{DownloadTask, DownloadConfig};
-use super::performance_monitor::PerformanceMonitor;
+use super::downloader::{DownloadConfig, DownloadTask};
+use super::downloader_interface::{BaseDownloader, Downloader};
 use super::file_utils::create_download_file;
+use super::performance_monitor::PerformanceMonitor;
 
 // HTTP/3 downloader
 // Uses QUIC (quinn) + HTTP/3 (h3) for downloads
@@ -32,7 +32,8 @@ impl HTTP3Downloader {
     }
 
     /// Build rustls TLS config for QUIC
-    fn build_tls_config() -> Result<Arc<rustls::ClientConfig>, Box<dyn std::error::Error + Send + Sync>> {
+    fn build_tls_config()
+    -> Result<Arc<rustls::ClientConfig>, Box<dyn std::error::Error + Send + Sync>> {
         let mut root_store = rustls::RootCertStore::empty();
         root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
@@ -49,7 +50,7 @@ impl HTTP3Downloader {
 
         let quic_client_config = quinn::ClientConfig::new(Arc::new(
             quinn::crypto::rustls::QuicClientConfig::try_from(tls_config.as_ref().clone())
-                .map_err(|e| format!("QUIC TLS config failed: {}", e))?
+                .map_err(|e| format!("QUIC TLS config failed: {}", e))?,
         ));
 
         let bind_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
@@ -63,16 +64,16 @@ impl HTTP3Downloader {
 
 #[async_trait::async_trait]
 impl Downloader for HTTP3Downloader {
-    async fn download(&mut self, task: &DownloadTask) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn download(
+        &mut self,
+        task: &DownloadTask,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url_str = &task.url;
 
         // Parse URL
-        let url = url::Url::parse(url_str)
-            .map_err(|e| format!("Failed to parse URL: {}", e))?;
+        let url = url::Url::parse(url_str).map_err(|e| format!("Failed to parse URL: {}", e))?;
 
-        let host = url.host_str()
-            .ok_or("URL missing host")?
-            .to_string();
+        let host = url.host_str().ok_or("URL missing host")?.to_string();
         let port = url.port().unwrap_or(443);
         let path = url.path().to_string();
         let query = url.query().map(|q| format!("?{}", q)).unwrap_or_default();
@@ -86,18 +87,23 @@ impl Downloader for HTTP3Downloader {
 
         // DNS resolution
         let addr_str = format!("{}:{}", host, port);
-        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&addr_str).await
+        let addrs: Vec<SocketAddr> = tokio::net::lookup_host(&addr_str)
+            .await
             .map_err(|e| format!("DNS resolution failed ({}): {}", addr_str, e))?
             .collect();
 
-        let server_addr = addrs.into_iter().next()
+        let server_addr = addrs
+            .into_iter()
+            .next()
             .ok_or_else(|| format!("Failed to resolve host: {}", host))?;
 
         // Establish QUIC connection
-        let connecting = endpoint.connect(server_addr, &host)
+        let connecting = endpoint
+            .connect(server_addr, &host)
             .map_err(|e| format!("Failed to initiate QUIC connection: {}", e))?;
 
-        let quic_conn = connecting.await
+        let quic_conn = connecting
+            .await
             .map_err(|e| format!("QUIC handshake failed: {}", e))?;
 
         eprintln!("HTTP/3 QUIC handshake successful ({})", server_addr);
@@ -122,14 +128,20 @@ impl Downloader for HTTP3Downloader {
             .body(())
             .map_err(|e| format!("Failed to build HTTP/3 request: {}", e))?;
 
-        let mut stream = send_request.send_request(request).await
+        let mut stream = send_request
+            .send_request(request)
+            .await
             .map_err(|e| format!("Failed to send HTTP/3 request: {}", e))?;
 
-        stream.finish().await
+        stream
+            .finish()
+            .await
             .map_err(|e| format!("Failed to end HTTP/3 stream: {}", e))?;
 
         // Read response
-        let response = stream.recv_response().await
+        let response = stream
+            .recv_response()
+            .await
             .map_err(|e| format!("Failed to receive HTTP/3 response: {}", e))?;
 
         let status = response.status();
@@ -140,7 +152,8 @@ impl Downloader for HTTP3Downloader {
         }
 
         // Get Content-Length from response headers
-        let total = response.headers()
+        let total = response
+            .headers()
             .get("content-length")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<i64>().ok())
@@ -167,7 +180,8 @@ impl Downloader for HTTP3Downloader {
                     while data.has_remaining() {
                         let chunk_len = data.remaining().min(65536);
                         let chunk = data.chunk()[..chunk_len].to_vec();
-                        file.write_all(&chunk).await
+                        file.write_all(&chunk)
+                            .await
                             .map_err(|e| format!("Failed to write file: {}", e))?;
                         data.advance(chunk_len);
                         downloaded += chunk_len as i64;
@@ -181,7 +195,10 @@ impl Downloader for HTTP3Downloader {
             }
         }
 
-        eprintln!("HTTP/3 download complete: {:.2} MB", downloaded as f64 / 1024.0 / 1024.0);
+        eprintln!(
+            "HTTP/3 download complete: {:.2} MB",
+            downloaded as f64 / 1024.0 / 1024.0
+        );
         Ok(())
     }
 

@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::RwLock;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::RwLock;
 
-use super::downloader_interface::{Downloader, BaseDownloader};
-use super::downloader::{DownloadTask, DownloadConfig};
-use super::performance_monitor::PerformanceMonitor;
+use super::downloader::{DownloadConfig, DownloadTask};
+use super::downloader_interface::{BaseDownloader, Downloader};
 use super::file_utils::create_download_file;
+use super::performance_monitor::PerformanceMonitor;
 
 pub struct SFTPDownloader {
     base: BaseDownloader,
@@ -31,11 +31,14 @@ impl SFTPDownloader {
         }
     }
 
-    fn parse_sftp_url(url: &str) -> Result<(String, u16, String, String, String), Box<dyn std::error::Error + Send + Sync>> {
-        let parsed = url::Url::parse(url)
-            .map_err(|e| format!("Invalid SFTP URL: {}", e))?;
+    fn parse_sftp_url(
+        url: &str,
+    ) -> Result<(String, u16, String, String, String), Box<dyn std::error::Error + Send + Sync>>
+    {
+        let parsed = url::Url::parse(url).map_err(|e| format!("Invalid SFTP URL: {}", e))?;
 
-        let host = parsed.host_str()
+        let host = parsed
+            .host_str()
             .ok_or("SFTP URL missing host")?
             .to_string();
         let port = parsed.port().unwrap_or(22);
@@ -62,7 +65,9 @@ struct KnownHosts {
 
 impl KnownHosts {
     fn new() -> Self {
-        KnownHosts { keys: tokio::sync::RwLock::new(HashMap::new()) }
+        KnownHosts {
+            keys: tokio::sync::RwLock::new(HashMap::new()),
+        }
     }
 
     async fn add(&self, host: String, fingerprint: String) {
@@ -91,7 +96,8 @@ impl SshHandler {
     }
 
     fn allow_new(&self) {
-        self.accept_new.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.accept_new
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -108,7 +114,10 @@ impl russh::client::Handler for SshHandler {
 
         async move {
             let algo = format!("{:?}", server_public_key.algorithm());
-            let fp = format!("{:?}", server_public_key.fingerprint(russh::keys::HashAlg::Sha256));
+            let fp = format!(
+                "{:?}",
+                server_public_key.fingerprint(russh::keys::HashAlg::Sha256)
+            );
 
             if let Some(saved) = KNOWN_HOSTS.get(&host).await {
                 let accepted = saved == fp;
@@ -129,7 +138,10 @@ impl russh::client::Handler for SshHandler {
 
 #[async_trait::async_trait]
 impl Downloader for SFTPDownloader {
-    async fn download(&mut self, task: &DownloadTask) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn download(
+        &mut self,
+        task: &DownloadTask,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (host, port, remote_path, username, password) = Self::parse_sftp_url(&task.url)?;
         let save_path = task.save_path.clone();
         let monitor = self.monitor.clone();
@@ -145,7 +157,8 @@ impl Downloader for SFTPDownloader {
             .await
             .map_err(|e| format!("SSH failed: {}", e))?;
 
-        let auth_result = session.authenticate_password(&username, &password)
+        let auth_result = session
+            .authenticate_password(&username, &password)
             .await
             .map_err(|e| format!("Auth failed: {}", e))?;
 
@@ -153,11 +166,13 @@ impl Downloader for SFTPDownloader {
             return Err("Auth rejected".into());
         }
 
-        let channel = session.channel_open_session()
+        let channel = session
+            .channel_open_session()
             .await
             .map_err(|e| format!("Channel failed: {}", e))?;
 
-        channel.request_subsystem(true, "sftp")
+        channel
+            .request_subsystem(true, "sftp")
             .await
             .map_err(|e| format!("SFTP failed: {}", e))?;
 
@@ -165,13 +180,15 @@ impl Downloader for SFTPDownloader {
             .await
             .map_err(|e| format!("SFTP init failed: {}", e))?;
 
-        let metadata = sftp.metadata(&remote_path)
+        let metadata = sftp
+            .metadata(&remote_path)
             .await
             .map_err(|e| format!("Metadata failed: {}", e))?;
 
         let file_size = metadata.size.unwrap_or(0) as i64;
 
-        let mut remote_file = sftp.open(&remote_path)
+        let mut remote_file = sftp
+            .open(&remote_path)
             .await
             .map_err(|e| format!("Open failed: {}", e))?;
 
@@ -182,9 +199,17 @@ impl Downloader for SFTPDownloader {
 
         let mut buf = vec![0u8; 64 * 1024];
         loop {
-            let n = remote_file.read(&mut buf).await.map_err(|e| e.to_string())?;
-            if n == 0 { break; }
-            local_file.write_all(&buf[..n]).await.map_err(|e| e.to_string())?;
+            let n = remote_file
+                .read(&mut buf)
+                .await
+                .map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            local_file
+                .write_all(&buf[..n])
+                .await
+                .map_err(|e| e.to_string())?;
             downloaded += n as i64;
         }
 
@@ -200,23 +225,36 @@ impl Downloader for SFTPDownloader {
             m.add_bytes(downloaded).await;
         }
 
-        eprintln!("Done: {:.2}MB {:.1}s", downloaded as f64 / 1048576.0, elapsed);
+        eprintln!(
+            "Done: {:.2}MB {:.1}s",
+            downloaded as f64 / 1048576.0,
+            elapsed
+        );
 
-        let _ = session.disconnect(russh::Disconnect::ByApplication, "", "en").await;
+        let _ = session
+            .disconnect(russh::Disconnect::ByApplication, "", "en")
+            .await;
         Ok(())
     }
 
-    fn get_type(&self) -> String { "SFTP".to_string() }
+    fn get_type(&self) -> String {
+        "SFTP".to_string()
+    }
 
     async fn cancel(&mut self, _: Box<dyn Downloader>) {
         self.base.running = false;
     }
 
-    async fn get_snapshot(&self) -> Option<Box<dyn std::any::Any>> { None }
+    async fn get_snapshot(&self) -> Option<Box<dyn std::any::Any>> {
+        None
+    }
 }
 
 impl Default for SFTPDownloader {
     fn default() -> Self {
-        SFTPDownloader { base: BaseDownloader::new(), monitor: None }
+        SFTPDownloader {
+            base: BaseDownloader::new(),
+            monitor: None,
+        }
     }
 }

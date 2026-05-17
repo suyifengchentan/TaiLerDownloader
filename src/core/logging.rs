@@ -1,8 +1,8 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -70,7 +70,11 @@ impl LogEntry {
         self
     }
 
-    pub fn with_attribute(mut self, key: impl Into<String>, value: impl Into<serde_json::Value>) -> Self {
+    pub fn with_attribute(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<serde_json::Value>,
+    ) -> Self {
         if self.attributes.is_none() {
             self.attributes = Some(HashMap::new());
         }
@@ -140,10 +144,8 @@ impl Logger {
                 LogOutput::Stderr => {
                     eprintln!("{}", entry.to_json());
                 }
-                LogOutput::Callback(_url) => {
-                }
-                LogOutput::File(_path) => {
-                }
+                LogOutput::Callback(_url) => {}
+                LogOutput::File(_path) => {}
             }
         }
     }

@@ -1,11 +1,11 @@
+use super::downloader::{DownloadConfig, Event};
+#[cfg(feature = "socket")]
+use super::socket_client::SocketClient;
+#[cfg(feature = "websocket")]
+use super::websocket_client::WebSocketClient;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use super::downloader::{DownloadConfig, Event};
-#[cfg(feature = "websocket")]
-use super::websocket_client::WebSocketClient;
-#[cfg(feature = "socket")]
-use super::socket_client::SocketClient;
 
 pub async fn send_message(
     event: Event,
@@ -62,7 +62,10 @@ pub async fn send_message(
         }
 
         if !is_called && event_clone.event_type != super::downloader::EventType::Update {
-            eprintln!("警告: 没有回调函数 (event {:?}, data {:?})", event_clone.name, data);
+            eprintln!(
+                "警告: 没有回调函数 (event {:?}, data {:?})",
+                event_clone.name, data
+            );
         }
     });
 

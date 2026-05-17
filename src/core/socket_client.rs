@@ -1,13 +1,13 @@
 #![cfg(feature = "socket")]
 
+use super::downloader::{Event, EventType};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use serde::{Deserialize, Serialize};
-use super::downloader::{Event, EventType};
 
 const SOCKET_SEND_QUEUE_SIZE: usize = 1024;
 
@@ -114,7 +114,10 @@ impl SocketClient {
         payload: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let conn_guard = connection.lock().await;
-        let mut conn = conn_guard.as_ref().ok_or("socket not connected")?.try_clone()?;
+        let mut conn = conn_guard
+            .as_ref()
+            .ok_or("socket not connected")?
+            .try_clone()?;
         drop(conn_guard);
 
         let conn_connected = connected.lock().await;

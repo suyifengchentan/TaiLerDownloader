@@ -1,17 +1,23 @@
+use super::downloader::{DownloadChunk, DownloadConfig, DownloadTask, Event, EventType};
+use super::downloader_interface::{BaseDownloader, Downloader};
+use super::file_utils::create_download_file;
+use super::performance_monitor::PerformanceMonitor;
+use super::send_message::send_message;
+use futures::StreamExt;
+use reqwest::{
+    Client,
+    header::{
+        ACCEPT, ACCEPT_ENCODING, ACCEPT_LANGUAGE, CACHE_CONTROL, HeaderMap, HeaderValue, RANGE,
+        USER_AGENT,
+    },
+};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::fs::OpenOptions;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{mpsc, RwLock};
-use futures::StreamExt;
-use reqwest::{Client, header::{HeaderMap, HeaderValue, RANGE, USER_AGENT, ACCEPT, ACCEPT_LANGUAGE, ACCEPT_ENCODING, CACHE_CONTROL}};
-use serde::{Deserialize, Serialize};
-use super::downloader_interface::{Downloader, BaseDownloader};
-use super::downloader::{DownloadTask, DownloadChunk, DownloadConfig, Event, EventType};
-use super::performance_monitor::PerformanceMonitor;
-use super::send_message::send_message;
-use super::file_utils::create_download_file;
+use tokio::sync::{RwLock, mpsc};
 
 const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -20,19 +26,22 @@ static GLOBAL_HTTP_CLIENT: tokio::sync::OnceCell<Client> = tokio::sync::OnceCell
 
 /// Get global reusable HTTP Client (with Chrome TLS fingerprint emulation)
 async fn get_global_client() -> Client {
-    GLOBAL_HTTP_CLIENT.get_or_init(|| async {
-        use wreq_util::Emulation;
+    GLOBAL_HTTP_CLIENT
+        .get_or_init(|| async {
+            use wreq_util::Emulation;
 
-        Client::builder()
-            .emulation(Emulation::Chrome133)
-            .connect_timeout(Duration::from_secs(15))
-            .pool_idle_timeout(Duration::from_secs(90))
-            .pool_max_idle_per_host(32)
-            .tcp_keepalive(Duration::from_secs(30))
-            .tcp_nodelay(true)
-            .build()
-            .expect("Failed to create HTTP client")
-    }).await.clone()
+            Client::builder()
+                .emulation(Emulation::Chrome133)
+                .connect_timeout(Duration::from_secs(15))
+                .pool_idle_timeout(Duration::from_secs(90))
+                .pool_max_idle_per_host(32)
+                .tcp_keepalive(Duration::from_secs(30))
+                .tcp_nodelay(true)
+                .build()
+                .expect("Failed to create HTTP client")
+        })
+        .await
+        .clone()
 }
 
 /// Buffer Pool for memory reuse
@@ -206,7 +215,10 @@ impl HTTPDownloader {
         }
     }
 
-    async fn get_file_size(&self, url: &str) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+    async fn get_file_size(
+        &self,
+        url: &str,
+    ) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
         // Use GET bytes=0-0 first (HEAD is often blocked by CDNs / returns 429)
         let response = self.client
             .get(url)
@@ -218,7 +230,16 @@ impl HTTPDownloader {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("Failed to get file size: {} — body: {}", status, if body.len() > 300 { body[..300].to_string() } else { body }).into());
+            return Err(format!(
+                "Failed to get file size: {} — body: {}",
+                status,
+                if body.len() > 300 {
+                    body[..300].to_string()
+                } else {
+                    body
+                }
+            )
+            .into());
         }
 
         // Prefer Content-Range header (from Range response)
@@ -226,7 +247,11 @@ impl HTTPDownloader {
             .headers()
             .get("content-range")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split('/').last().and_then(|total| total.parse::<i64>().ok()))
+            .and_then(|s| {
+                s.split('/')
+                    .last()
+                    .and_then(|total| total.parse::<i64>().ok())
+            })
         {
             if content_length > 0 {
                 return Ok(content_length);
@@ -287,36 +312,41 @@ impl HTTPDownloader {
         _total_size: i64,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let current_end = end_pos.load(Ordering::Relaxed);
-        
+
         let (global_headers, task_headers) = {
             let cfg = self.base.config.as_ref().unwrap().read().await;
             (cfg.headers.clone(), task.headers.clone())
         };
-        
+
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"));
-        headers.insert(RANGE, HeaderValue::from_str(&format!("bytes={}-{}", start, current_end))?);
+        headers.insert(
+            RANGE,
+            HeaderValue::from_str(&format!("bytes={}-{}", start, current_end))?,
+        );
         headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
         headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
         headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("identity"));
         headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
-        
+
         for (key, value) in global_headers {
-            if let (Ok(name), Ok(val)) = (key.parse::<reqwest::header::HeaderName>(), value.parse::<reqwest::header::HeaderValue>()) {
+            if let (Ok(name), Ok(val)) = (
+                key.parse::<reqwest::header::HeaderName>(),
+                value.parse::<reqwest::header::HeaderValue>(),
+            ) {
                 headers.insert(name, val);
             }
         }
         for (key, value) in task_headers {
-            if let (Ok(name), Ok(val)) = (key.parse::<reqwest::header::HeaderName>(), value.parse::<reqwest::header::HeaderValue>()) {
+            if let (Ok(name), Ok(val)) = (
+                key.parse::<reqwest::header::HeaderName>(),
+                value.parse::<reqwest::header::HeaderValue>(),
+            ) {
                 headers.insert(name, val);
             }
         }
 
-        let response = self.client
-            .get(&task.url)
-            .headers(headers)
-            .send()
-            .await?;
+        let response = self.client.get(&task.url).headers(headers).send().await?;
 
         if !response.status().is_success() {
             return Err(format!("Bad status: {}", response.status()).into());
@@ -342,9 +372,7 @@ impl HTTPDownloader {
             }
         });
 
-        let mut writer = OpenOptions::new()
-            .write(true)
-            .open(&task.save_path).await?;
+        let mut writer = OpenOptions::new().write(true).open(&task.save_path).await?;
 
         writer.seek(std::io::SeekFrom::Start(start as u64)).await?;
 
@@ -430,7 +458,14 @@ impl HTTPDownloader {
             let mut data = serde_json::Map::new();
             data.insert("Error".to_string(), serde_json::Value::String(msg));
 
-            let _ = send_message(event, data.into_iter().map(|(k, v)| (k, v)).collect(), config, &self.base.ws_client, &self.base.socket_client).await;
+            let _ = send_message(
+                event,
+                data.into_iter().map(|(k, v)| (k, v)).collect(),
+                config,
+                &self.base.ws_client,
+                &self.base.socket_client,
+            )
+            .await;
         }
     }
 }
@@ -453,11 +488,14 @@ impl Default for BaseDownloader {
 
 #[async_trait::async_trait]
 impl Downloader for HTTPDownloader {
-    async fn download(&mut self, task: &DownloadTask) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn download(
+        &mut self,
+        task: &DownloadTask,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let file_size = self.get_file_size(&task.url).await?;
 
         self.status = Some(DownloadStatus::new(file_size));
-        
+
         // Update global monitor total size
         if let Some(ref monitor) = self.monitor {
             monitor.set_total_bytes(file_size);
@@ -483,9 +521,10 @@ impl Downloader for HTTPDownloader {
         let downloaded_size = Arc::new(RwLock::new(0i64));
 
         // Create dynamic chunk workers
-        let workers: Vec<Arc<ChunkWorker>> = chunks.iter().map(|c| {
-            Arc::new(ChunkWorker::new(c.start_offset, c.end_offset))
-        }).collect();
+        let workers: Vec<Arc<ChunkWorker>> = chunks
+            .iter()
+            .map(|c| Arc::new(ChunkWorker::new(c.start_offset, c.end_offset)))
+            .collect();
 
         let mut join_set = tokio::task::JoinSet::new();
         let mut active_count = 0usize;
@@ -499,10 +538,16 @@ impl Downloader for HTTPDownloader {
             let progress = worker.progress.clone();
 
             join_set.spawn(async move {
-                self_clone.download_chunk_dynamic(
-                    &task_clone, start, end_pos, progress,
-                    downloaded_size_clone, file_size
-                ).await
+                self_clone
+                    .download_chunk_dynamic(
+                        &task_clone,
+                        start,
+                        end_pos,
+                        progress,
+                        downloaded_size_clone,
+                        file_size,
+                    )
+                    .await
             });
             active_count += 1;
 
@@ -516,7 +561,8 @@ impl Downloader for HTTPDownloader {
         // Dynamic splitting: when one worker completes, find the largest remaining worker and split it
         while let Some(result) = join_set.join_next().await {
             if let Err(e) = result {
-                self.send_error_message(format!("worker error: {:?}", e)).await;
+                self.send_error_message(format!("worker error: {:?}", e))
+                    .await;
                 if let Some(ref status) = self.status {
                     status.set_error(format!("worker error: {:?}", e)).await;
                 }
@@ -554,15 +600,27 @@ impl Downloader for HTTPDownloader {
                         let new_progress = new_worker.progress.clone();
 
                         join_set.spawn(async move {
-                            self_clone.download_chunk_dynamic(
-                                &task_clone, new_start, new_end_pos, new_progress,
-                                downloaded_size_clone, file_size
-                            ).await
+                            self_clone
+                                .download_chunk_dynamic(
+                                    &task_clone,
+                                    new_start,
+                                    new_end_pos,
+                                    new_progress,
+                                    downloaded_size_clone,
+                                    file_size,
+                                )
+                                .await
                         });
                         active_count += 1;
 
-                        eprintln!("Dynamic split: [{} - {}] split to [{} - {}], active connections: {}",
-                            current_progress, mid, mid + 1, current_end, active_count);
+                        eprintln!(
+                            "Dynamic split: [{} - {}] split to [{} - {}], active connections: {}",
+                            current_progress,
+                            mid,
+                            mid + 1,
+                            current_end,
+                            active_count
+                        );
                     }
                 }
             }
@@ -570,7 +628,9 @@ impl Downloader for HTTPDownloader {
 
         let current_size = *downloaded_size.read().await;
         if current_size != file_size {
-            return Err(format!("download incomplete: {}/{} bytes", current_size, file_size).into());
+            return Err(
+                format!("download incomplete: {}/{} bytes", current_size, file_size).into(),
+            );
         }
 
         Ok(())
@@ -588,14 +648,20 @@ impl Downloader for HTTPDownloader {
         if let Some(ref status) = self.status {
             let current_speed = if let Some(ref monitor) = self.monitor {
                 let stats = monitor.get_stats().await;
-                stats.get("current_speed_bps").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                stats
+                    .get("current_speed_bps")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
             } else {
                 0.0
             };
 
             let average_speed = if let Some(ref monitor) = self.monitor {
                 let stats = monitor.get_stats().await;
-                stats.get("average_speed_bps").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                stats
+                    .get("average_speed_bps")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
             } else {
                 0.0
             };

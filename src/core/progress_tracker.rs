@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

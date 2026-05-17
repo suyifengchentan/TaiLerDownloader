@@ -6,16 +6,16 @@ use jni::EnvUnowned;
 #[cfg(feature = "android")]
 use jni::objects::JClass;
 #[cfg(feature = "android")]
-use jni::sys::{jint, jboolean};
-#[cfg(feature = "android")]
-use std::sync::{Arc, Mutex};
+use jni::sys::{jboolean, jint};
 #[cfg(feature = "android")]
 use std::collections::HashMap;
+#[cfg(feature = "android")]
+use std::sync::{Arc, Mutex};
 #[cfg(feature = "android")]
 use tokio::sync::RwLock;
 
 #[cfg(feature = "android")]
-use super::downloader::{HSDownloader, DownloadTask, DownloadConfig, Event, EventType, UA};
+use super::downloader::{DownloadConfig, DownloadTask, Event, EventType, HSDownloader, UA};
 #[cfg(feature = "android")]
 use super::send_message::send_message;
 
@@ -48,10 +48,12 @@ use jni::Outcome;
 
 #[cfg(feature = "android")]
 fn jstring_to_string(env: &mut EnvUnowned<'_>, jstr: &jni::objects::JString<'_>) -> Option<String> {
-    let outcome = env.with_env(|e: &mut jni::Env<'_>| -> Result<String, jni::errors::Error> {
-        let java_str = e.get_string(jstr)?;
-        Ok(java_str.to_string())
-    });
+    let outcome = env.with_env(
+        |e: &mut jni::Env<'_>| -> Result<String, jni::errors::Error> {
+            let java_str = e.get_string(jstr)?;
+            Ok(java_str.to_string())
+        },
+    );
     match outcome.into_outcome() {
         Outcome::Ok(s) => Some(s),
         _ => None,
@@ -59,7 +61,7 @@ fn jstring_to_string(env: &mut EnvUnowned<'_>, jstr: &jni::objects::JString<'_>)
 }
 
 /// JNI 函数: 启动下载任务
-/// 
+///
 /// 参数说明:
 /// - env: JNI 环境
 /// - _class: Java 类对象
@@ -119,7 +121,11 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_startDownload<'local>(
         callback_func: None,
         use_callback_url: use_callback_url != jni::sys::JNI_FALSE,
         callback_url: cb_url,
-        use_socket: if use_socket != jni::sys::JNI_FALSE { Some(true) } else { None },
+        use_socket: if use_socket != jni::sys::JNI_FALSE {
+            Some(true)
+        } else {
+            None
+        },
         show_name: String::new(),
         user_agent: UA.to_string(),
         max_retries: 3,
@@ -127,6 +133,8 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_startDownload<'local>(
         max_retry_delay_ms: 30000,
         speed_limit_bps: 0,
         proxy_url: None,
+        ed2k_gateways: super::downloader::default_ed2k_gateways(),
+        torrent_trackers: super::downloader::default_torrent_trackers(),
         headers: std::collections::HashMap::new(),
     };
 
@@ -146,7 +154,11 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_startDownload<'local>(
     let downloader_clone = downloader.clone();
     RUNTIME.spawn(async move {
         let result = if is_multiple != jni::sys::JNI_FALSE {
-            downloader_clone.read().await.start_multiple_downloads().await
+            downloader_clone
+                .read()
+                .await
+                .start_multiple_downloads()
+                .await
         } else {
             downloader_clone.read().await.start_download().await
         };
@@ -160,7 +172,10 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_startDownload<'local>(
             };
 
             let mut data = HashMap::new();
-            data.insert("Error".to_string(), serde_json::Value::String(e.to_string()));
+            data.insert(
+                "Error".to_string(),
+                serde_json::Value::String(e.to_string()),
+            );
 
             let config = downloader_clone.read().await.config.clone();
             let ws_client = downloader_clone.read().await.ws_client.clone();
@@ -217,7 +232,11 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_getDownloader<'local>(
         callback_func: None,
         use_callback_url: use_callback_url != jni::sys::JNI_FALSE,
         callback_url: cb_url,
-        use_socket: if use_socket != jni::sys::JNI_FALSE { Some(true) } else { None },
+        use_socket: if use_socket != jni::sys::JNI_FALSE {
+            Some(true)
+        } else {
+            None
+        },
         show_name: String::new(),
         user_agent: UA.to_string(),
         max_retries: 3,
@@ -225,6 +244,8 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_getDownloader<'local>(
         max_retry_delay_ms: 30000,
         speed_limit_bps: 0,
         proxy_url: None,
+        ed2k_gateways: super::downloader::default_ed2k_gateways(),
+        torrent_trackers: super::downloader::default_torrent_trackers(),
         headers: std::collections::HashMap::new(),
     };
 
@@ -271,7 +292,10 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_startDownloadById<'local>(
                     };
 
                     let mut data = HashMap::new();
-                    data.insert("Error".to_string(), serde_json::Value::String(e.to_string()));
+                    data.insert(
+                        "Error".to_string(),
+                        serde_json::Value::String(e.to_string()),
+                    );
 
                     let config = d_clone.read().await.config.clone();
                     let ws_client = d_clone.read().await.ws_client.clone();
@@ -316,7 +340,10 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_startMultipleDownloadsById<'local>
                     };
 
                     let mut data = HashMap::new();
-                    data.insert("Error".to_string(), serde_json::Value::String(e.to_string()));
+                    data.insert(
+                        "Error".to_string(),
+                        serde_json::Value::String(e.to_string()),
+                    );
 
                     let config = d_clone.read().await.config.clone();
                     let ws_client = d_clone.read().await.ws_client.clone();
@@ -371,9 +398,7 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_resumeDownload<'local>(
 
     match downloader {
         Some(d) => {
-            let result = RUNTIME.block_on(async {
-                d.read().await.resume_download().await
-            });
+            let result = RUNTIME.block_on(async { d.read().await.resume_download().await });
             match result {
                 Ok(_) => 0,
                 Err(_) => -1,
@@ -397,9 +422,7 @@ pub extern "C" fn Java_com_tthsd_TTHSDLibrary_stopDownload<'local>(
 
     match downloader {
         Some(d) => {
-            let result = RUNTIME.block_on(async {
-                d.read().await.stop_download().await
-            });
+            let result = RUNTIME.block_on(async { d.read().await.stop_download().await });
             match result {
                 Ok(_) => 0,
                 Err(_) => -1,

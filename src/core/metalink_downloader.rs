@@ -1,13 +1,13 @@
 #![cfg(feature = "metalink")]
 
-use std::sync::Arc;
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::downloader_interface::{Downloader, BaseDownloader};
-use super::downloader::{DownloadTask, DownloadConfig};
-use super::performance_monitor::PerformanceMonitor;
+use super::downloader::{DownloadConfig, DownloadTask};
+use super::downloader_interface::{BaseDownloader, Downloader};
 use super::file_utils::create_download_file;
+use super::performance_monitor::PerformanceMonitor;
 
 /// Metalink Downloader
 /// Supports Metalink 4.0 (.metalink / .meta4) format
@@ -33,7 +33,10 @@ impl MetalinkDownloader {
 
 #[async_trait::async_trait]
 impl Downloader for MetalinkDownloader {
-    async fn download(&mut self, task: &DownloadTask) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn download(
+        &mut self,
+        task: &DownloadTask,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = &task.url;
         let save_path = task.save_path.clone();
 
@@ -45,10 +48,13 @@ impl Downloader for MetalinkDownloader {
             .build()
             .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-        let xml_text = client.get(url)
-            .send().await
+        let xml_text = client
+            .get(url)
+            .send()
+            .await
             .map_err(|e| format!("Failed to fetch Metalink file: {}", e))?
-            .text().await
+            .text()
+            .await
             .map_err(|e| format!("Failed to read Metalink content: {}", e))?;
 
         // 2. Parse Metalink XML
@@ -65,14 +71,20 @@ impl Downloader for MetalinkDownloader {
 
         eprintln!("Metalink file name: {}", file_name);
         if let Some(size) = file_entry.size {
-            eprintln!("Metalink file size: {} bytes ({:.2} MB)", size, size as f64 / 1024.0 / 1024.0);
+            eprintln!(
+                "Metalink file size: {} bytes ({:.2} MB)",
+                size,
+                size as f64 / 1024.0 / 1024.0
+            );
             if let Some(ref monitor) = self.monitor {
                 monitor.set_total_bytes(size as i64);
             }
         }
 
         // 4. Extract all HTTP(S) mirror URLs, sorted by priority
-        let mut mirror_urls: Vec<(u32, String)> = file_entry.urls.iter()
+        let mut mirror_urls: Vec<(u32, String)> = file_entry
+            .urls
+            .iter()
             .filter_map(|u| {
                 let url_str = u.value.clone();
                 if url_str.starts_with("http://") || url_str.starts_with("https://") {
@@ -90,7 +102,10 @@ impl Downloader for MetalinkDownloader {
             return Err("No available HTTP(S) mirror URLs in Metalink".into());
         }
 
-        eprintln!("Found {} mirror URLs, using highest priority mirror", mirror_urls.len());
+        eprintln!(
+            "Found {} mirror URLs, using highest priority mirror",
+            mirror_urls.len()
+        );
         for (p, u) in &mirror_urls {
             eprintln!("  [priority {}] {}", p, u);
         }
@@ -101,8 +116,10 @@ impl Downloader for MetalinkDownloader {
         eprintln!("Selected mirror: {}", best_url);
 
         // Directly use reqwest streaming download (to avoid circular dependency with HTTPDownloader)
-        let response = client.get(&best_url)
-            .send().await
+        let response = client
+            .get(&best_url)
+            .send()
+            .await
             .map_err(|e| format!("Metalink HTTP request failed: {}", e))?;
 
         let total = response.content_length().unwrap_or(0) as i64;
@@ -122,7 +139,8 @@ impl Downloader for MetalinkDownloader {
 
         while let Some(chunk) = stream.next().await {
             let bytes = chunk.map_err(|e| format!("Stream read error: {}", e))?;
-            file.write_all(&bytes).await
+            file.write_all(&bytes)
+                .await
                 .map_err(|e| format!("Write failed: {}", e))?;
             downloaded += bytes.len() as i64;
             if let Some(ref monitor) = self.monitor {
@@ -130,7 +148,10 @@ impl Downloader for MetalinkDownloader {
             }
         }
 
-        eprintln!("Metalink download complete: {:.2} MB", downloaded as f64 / 1024.0 / 1024.0);
+        eprintln!(
+            "Metalink download complete: {:.2} MB",
+            downloaded as f64 / 1024.0 / 1024.0
+        );
         Ok(())
     }
 

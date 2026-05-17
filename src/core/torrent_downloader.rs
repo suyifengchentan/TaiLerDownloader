@@ -1,13 +1,13 @@
 #![cfg(feature = "torrent")]
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use librqbit::{AddTorrent, AddTorrentOptions, Session};
 
-use super::downloader_interface::{Downloader, BaseDownloader};
-use super::downloader::{DownloadTask, DownloadConfig};
+use super::downloader::{DownloadConfig, DownloadTask};
+use super::downloader_interface::{BaseDownloader, Downloader};
 use super::performance_monitor::PerformanceMonitor;
 
 /// BitTorrent Downloader
@@ -35,17 +35,28 @@ impl TorrentDownloader {
 
 #[async_trait::async_trait]
 impl Downloader for TorrentDownloader {
-    async fn download(&mut self, task: &DownloadTask) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn download(
+        &mut self,
+        task: &DownloadTask,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Determine output directory (get parent from save_path)
         let save_path = PathBuf::from(&task.save_path);
-        let output_dir = save_path.parent()
+        let output_dir = save_path
+            .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_path_buf();
 
         eprintln!("BT download: {} -> {:?}", task.url, output_dir);
 
+        let trackers = if let Some(config) = &self.base.config {
+            config.read().await.torrent_trackers.clone()
+        } else {
+            Vec::new()
+        };
+
         // Create librqbit Session
-        let session = Session::new(output_dir).await
+        let session = Session::new(output_dir)
+            .await
             .map_err(|e| format!("Failed to create BT Session: {}", e))?;
 
         // Build AddTorrent parameters
@@ -60,10 +71,17 @@ impl Downloader for TorrentDownloader {
 
         // Add torrent and start download
         let opts = AddTorrentOptions {
+            trackers: if trackers.is_empty() {
+                None
+            } else {
+                Some(trackers)
+            },
             ..Default::default()
         };
 
-        let response = session.add_torrent(add_torrent, Some(opts)).await
+        let response = session
+            .add_torrent(add_torrent, Some(opts))
+            .await
             .map_err(|e| format!("Failed to add torrent: {}", e))?;
 
         let handle = match response {
@@ -103,7 +121,10 @@ impl Downloader for TorrentDownloader {
 
             // Check if completed
             if downloaded >= total && total > 0 {
-                eprintln!("BT download complete: {:.2} MB", total as f64 / 1024.0 / 1024.0);
+                eprintln!(
+                    "BT download complete: {:.2} MB",
+                    total as f64 / 1024.0 / 1024.0
+                );
                 break;
             }
 

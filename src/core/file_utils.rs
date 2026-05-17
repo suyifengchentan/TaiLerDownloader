@@ -1,6 +1,6 @@
-use tokio::fs::{File, OpenOptions};
-use std::fs::OpenOptions as SyncOpenOptions;
 use std::fs::File as SyncFile;
+use std::fs::OpenOptions as SyncOpenOptions;
+use tokio::fs::{File, OpenOptions};
 
 const FAT32_MAX_FILE_SIZE: i64 = 4_294_967_295;
 
@@ -11,7 +11,8 @@ pub async fn create_download_file(
     let file = OpenOptions::new()
         .write(true)
         .create(true)
-        .open(save_path).await
+        .open(save_path)
+        .await
         .map_err(|e| format!("Failed to create file: {}", e))?;
 
     if let Some(size) = file_size {
@@ -27,7 +28,10 @@ pub async fn create_download_file(
                 if e.kind() == std::io::ErrorKind::StorageFull {
                     return Err("Insufficient disk space".into());
                 }
-                eprintln!("Warning: Failed to pre-allocate file space ({}), will continue downloading", e);
+                eprintln!(
+                    "Warning: Failed to pre-allocate file space ({}), will continue downloading",
+                    e
+                );
             }
         }
     }
@@ -58,7 +62,10 @@ pub fn create_download_file_sync(
                 if e.kind() == std::io::ErrorKind::StorageFull {
                     return Err("Insufficient disk space".to_string());
                 }
-                eprintln!("Warning: Failed to pre-allocate file space ({}), will continue downloading", e);
+                eprintln!(
+                    "Warning: Failed to pre-allocate file space ({}), will continue downloading",
+                    e
+                );
             }
         }
     }

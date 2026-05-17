@@ -1,12 +1,12 @@
 #![cfg(feature = "websocket")]
 
+use super::downloader::{Event, EventType};
+use futures::sink::SinkExt;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
-use futures::sink::SinkExt;
-use serde::{Deserialize, Serialize};
-use super::downloader::{Event, EventType};
 
 const WS_SEND_QUEUE_SIZE: usize = 1024;
 
@@ -20,7 +20,15 @@ pub struct ProgressMessageWs {
 
 pub struct WebSocketClient {
     url: String,
-    connection: Arc<tokio::sync::Mutex<Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>>,
+    connection: Arc<
+        tokio::sync::Mutex<
+            Option<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+            >,
+        >,
+    >,
     connected: Arc<tokio::sync::Mutex<bool>>,
     send_queue: tokio::sync::broadcast::Sender<Vec<u8>>,
     done: Arc<tokio::sync::Mutex<bool>>,
@@ -66,9 +74,7 @@ impl WebSocketClient {
         }
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(async {
-            connect_async(&ws_url).await
-        });
+        let result = rt.block_on(async { connect_async(&ws_url).await });
 
         match result {
             Ok((ws_stream, _)) => {
@@ -137,7 +143,15 @@ impl WebSocketClient {
     }
 
     async fn write_raw(
-        connection: &Arc<Mutex<Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>>,
+        connection: &Arc<
+            Mutex<
+                Option<
+                    tokio_tungstenite::WebSocketStream<
+                        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                    >,
+                >,
+            >,
+        >,
         connected: &Arc<Mutex<bool>>,
         payload: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

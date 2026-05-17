@@ -1,15 +1,55 @@
+use super::performance_monitor::get_global_monitor;
+use super::send_message::send_message;
+#[cfg(feature = "socket")]
+use super::socket_client::SocketClient;
+#[cfg(feature = "websocket")]
+use super::websocket_client::WebSocketClient;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
-use serde::{Deserialize, Serialize};
-#[cfg(feature = "websocket")]
-use super::websocket_client::WebSocketClient;
-#[cfg(feature = "socket")]
-use super::socket_client::SocketClient;
-use super::send_message::send_message;
-use super::performance_monitor::get_global_monitor;
 
 pub const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+pub const DEFAULT_ED2K_GATEWAYS: &[&str] = &[
+    "https://ed2k.lyoko.io/hash/{hash}",
+    "http://ed2k.lyoko.io/hash/{hash}",
+];
+pub const DEFAULT_TORRENT_TRACKERS: &[&str] = &[
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.demonii.com:1337/announce",
+    "udp://open.stealth.si:80/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://vito-tracker.space:6969/announce",
+    "udp://vito-tracker.duckdns.org:6969/announce",
+    "udp://udp.tracker.projectk.org:23333/announce",
+    "udp://tracker.tryhackx.org:6969/announce",
+    "udp://tracker.t-1.org:6969/announce",
+    "udp://tracker.startwork.cv:1337/announce",
+    "udp://tracker.srv00.com:6969/announce",
+    "udp://tracker.qu.ax:6969/announce",
+    "udp://tracker.plx.im:6969/announce",
+    "udp://tracker.opentorrent.top:6969/announce",
+    "udp://tracker.iperson.xyz:6969/announce",
+    "udp://tracker.gmi.gd:6969/announce",
+    "udp://tracker.ducks.party:1984/announce",
+    "udp://tracker.bluefrog.pw:2710/announce",
+    "udp://tracker.bittor.pw:1337/announce",
+    "udp://tracker.auctor.tv:6969/announce",
+];
+
+pub fn default_ed2k_gateways() -> Vec<String> {
+    DEFAULT_ED2K_GATEWAYS
+        .iter()
+        .map(|gateway| (*gateway).to_string())
+        .collect()
+}
+
+pub fn default_torrent_trackers() -> Vec<String> {
+    DEFAULT_TORRENT_TRACKERS
+        .iter()
+        .map(|tracker| (*tracker).to_string())
+        .collect()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadTask {
@@ -39,6 +79,8 @@ pub struct DownloadConfig {
     pub max_retry_delay_ms: u64,
     pub speed_limit_bps: u64,
     pub proxy_url: Option<String>,
+    pub ed2k_gateways: Vec<String>,
+    pub torrent_trackers: Vec<String>,
     pub headers: std::collections::HashMap<String, String>,
 }
 
@@ -100,7 +142,10 @@ pub struct HSDownloader {
 }
 
 impl HSDownloader {
-    pub fn merge_headers(global_headers: &std::collections::HashMap<String, String>, task_headers: &std::collections::HashMap<String, String>) -> std::collections::HashMap<String, String> {
+    pub fn merge_headers(
+        global_headers: &std::collections::HashMap<String, String>,
+        task_headers: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
         let mut merged = global_headers.clone();
         for (key, value) in task_headers {
             merged.insert(key.clone(), value.clone());
@@ -121,11 +166,15 @@ impl HSDownloader {
                     if let Some(use_socket) = cfg.use_socket {
                         #[cfg(feature = "socket")]
                         if use_socket {
-                            socket_client = Some(Arc::new(tokio::sync::Mutex::new(SocketClient::new(callback_url.clone()))));
+                            socket_client = Some(Arc::new(tokio::sync::Mutex::new(
+                                SocketClient::new(callback_url.clone()),
+                            )));
                         }
                         #[cfg(feature = "websocket")]
                         if !use_socket {
-                            ws_client = Some(Arc::new(tokio::sync::Mutex::new(WebSocketClient::new(callback_url.clone()))));
+                            ws_client = Some(Arc::new(tokio::sync::Mutex::new(
+                                WebSocketClient::new(callback_url.clone()),
+                            )));
                         }
                     }
                 }
@@ -142,10 +191,22 @@ impl HSDownloader {
         }
     }
 
-    pub fn get_downloader(tasks: Vec<DownloadTask>, thread_count: usize, chunk_size_mb: usize) -> Self {
+    pub fn get_downloader(
+        tasks: Vec<DownloadTask>,
+        thread_count: usize,
+        chunk_size_mb: usize,
+    ) -> Self {
         let num_cpus = num_cpus::get();
-        let thread_count = if thread_count == 0 { num_cpus * 2 } else { thread_count };
-        let chunk_size_mb = if chunk_size_mb == 0 { 10 } else { chunk_size_mb };
+        let thread_count = if thread_count == 0 {
+            num_cpus * 2
+        } else {
+            thread_count
+        };
+        let chunk_size_mb = if chunk_size_mb == 0 {
+            10
+        } else {
+            chunk_size_mb
+        };
 
         let config = DownloadConfig {
             tasks,
@@ -162,6 +223,8 @@ impl HSDownloader {
             max_retry_delay_ms: 30000,
             speed_limit_bps: 0,
             proxy_url: None,
+            ed2k_gateways: default_ed2k_gateways(),
+            torrent_trackers: default_torrent_trackers(),
             headers: std::collections::HashMap::new(),
         };
 
@@ -186,7 +249,14 @@ impl HSDownloader {
             id: String::new(),
         };
 
-        send_message(event, HashMap::new(), &self.config, &self.ws_client, &self.socket_client).await?;
+        send_message(
+            event,
+            HashMap::new(),
+            &self.config,
+            &self.ws_client,
+            &self.socket_client,
+        )
+        .await?;
 
         let tasks = {
             let config = self.config.read().await;
@@ -202,14 +272,8 @@ impl HSDownloader {
             let socket_client = self.socket_client.clone();
 
             join_set.spawn(async move {
-                Self::download_task(
-                    task,
-                    index,
-                    token_clone,
-                    config,
-                    ws_client,
-                    socket_client,
-                ).await
+                Self::download_task(task, index, token_clone, config, ws_client, socket_client)
+                    .await
             });
         }
 
@@ -226,7 +290,7 @@ impl HSDownloader {
                     _ = interval.tick() => {
                         if let Some(monitor) = get_global_monitor().await {
                             let mut stats = monitor.get_stats().await;
-                            
+
                             // 兼容旧版 Golang 接口的字段命名 (各语言 Bindings 依赖这两个字段计算进度)
                             if let Some(total_bytes) = stats.get("total_bytes").cloned() {
                                 stats.insert("Downloaded".to_string(), total_bytes);
@@ -273,7 +337,14 @@ impl HSDownloader {
             id: String::new(),
         };
 
-        send_message(end_event, HashMap::new(), &self.config, &self.ws_client, &self.socket_client).await?;
+        send_message(
+            end_event,
+            HashMap::new(),
+            &self.config,
+            &self.ws_client,
+            &self.socket_client,
+        )
+        .await?;
 
         if let Some(monitor) = get_global_monitor().await {
             monitor.print_stats().await;
@@ -286,7 +357,9 @@ impl HSDownloader {
         Ok(())
     }
 
-    pub async fn start_multiple_downloads(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn start_multiple_downloads(
+        &self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut cancel_guard = self.cancel_token.lock().await;
         if cancel_guard.is_some() {
             drop(cancel_guard);
@@ -304,7 +377,14 @@ impl HSDownloader {
             id: String::new(),
         };
 
-        send_message(event, HashMap::new(), &self.config, &self.ws_client, &self.socket_client).await?;
+        send_message(
+            event,
+            HashMap::new(),
+            &self.config,
+            &self.ws_client,
+            &self.socket_client,
+        )
+        .await?;
 
         let tasks = {
             let config = self.config.read().await;
@@ -320,14 +400,8 @@ impl HSDownloader {
             let socket_client = self.socket_client.clone();
 
             join_set.spawn(async move {
-                Self::download_task(
-                    task,
-                    index,
-                    token_clone,
-                    config,
-                    ws_client,
-                    socket_client,
-                ).await
+                Self::download_task(task, index, token_clone, config, ws_client, socket_client)
+                    .await
             });
         }
 
@@ -344,12 +418,12 @@ impl HSDownloader {
                     _ = interval.tick() => {
                         if let Some(monitor) = get_global_monitor().await {
                             let mut stats = monitor.get_stats().await;
-                            
+
                             // 兼容旧版 Golang 接口的字段命名
                             if let Some(total_bytes) = stats.get("total_bytes").cloned() {
                                 stats.insert("Downloaded".to_string(), total_bytes);
                             }
-                            
+
                             let event = Event {
                                 event_type: EventType::Update,
                                 name: "Progress Update".to_string(),
@@ -391,7 +465,14 @@ impl HSDownloader {
             id: String::new(),
         };
 
-        send_message(end_event, HashMap::new(), &self.config, &self.ws_client, &self.socket_client).await?;
+        send_message(
+            end_event,
+            HashMap::new(),
+            &self.config,
+            &self.ws_client,
+            &self.socket_client,
+        )
+        .await?;
 
         let mut cancel_guard = self.cancel_token.lock().await;
         *cancel_guard = None;
@@ -423,11 +504,26 @@ impl HSDownloader {
         };
 
         let mut data = HashMap::new();
-        data.insert("URL".to_string(), serde_json::Value::String(task.url.clone()));
-        data.insert("SavePath".to_string(), serde_json::Value::String(task.save_path.clone()));
-        data.insert("ShowName".to_string(), serde_json::Value::String(task.show_name.clone()));
-        data.insert("Index".to_string(), serde_json::Value::Number(serde_json::Number::from(index + 1)));
-        data.insert("Total".to_string(), serde_json::Value::Number(serde_json::Number::from(total)));
+        data.insert(
+            "URL".to_string(),
+            serde_json::Value::String(task.url.clone()),
+        );
+        data.insert(
+            "SavePath".to_string(),
+            serde_json::Value::String(task.save_path.clone()),
+        );
+        data.insert(
+            "ShowName".to_string(),
+            serde_json::Value::String(task.show_name.clone()),
+        );
+        data.insert(
+            "Index".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(index + 1)),
+        );
+        data.insert(
+            "Total".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(total)),
+        );
 
         if let Err(e) = send_message(start_event, data, &config, &ws_client, &socket_client).await {
             eprintln!("Failed to send start event: {:?}", e);
@@ -458,8 +554,21 @@ impl HSDownloader {
                                 id: task.id.clone(),
                             };
                             let mut retry_data = HashMap::new();
-                            retry_data.insert("Text".to_string(), serde_json::Value::String(format!("Retry {} succeeded", current_retry)));
-                            let _ = send_message(retry_event, retry_data, &config, &ws_client, &socket_client).await;
+                            retry_data.insert(
+                                "Text".to_string(),
+                                serde_json::Value::String(format!(
+                                    "Retry {} succeeded",
+                                    current_retry
+                                )),
+                            );
+                            let _ = send_message(
+                                retry_event,
+                                retry_data,
+                                &config,
+                                &ws_client,
+                                &socket_client,
+                            )
+                            .await;
                         }
                         return;
                     }
@@ -478,8 +587,21 @@ impl HSDownloader {
                             id: task.id.clone(),
                         };
                         let mut retry_data = HashMap::new();
-                        retry_data.insert("Text".to_string(), serde_json::Value::String(format!("Retry {} failed, retrying in {}ms (max {})", current_retry, delay, max_retries)));
-                        let _ = send_message(retry_event, retry_data, &config, &ws_client, &socket_client).await;
+                        retry_data.insert(
+                            "Text".to_string(),
+                            serde_json::Value::String(format!(
+                                "Retry {} failed, retrying in {}ms (max {})",
+                                current_retry, delay, max_retries
+                            )),
+                        );
+                        let _ = send_message(
+                            retry_event,
+                            retry_data,
+                            &config,
+                            &ws_client,
+                            &socket_client,
+                        )
+                        .await;
 
                         if !token.is_cancelled() {
                             tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
@@ -495,17 +617,32 @@ impl HSDownloader {
             }
 
             if let Some(ref e) = last_error {
-                eprintln!("Download failed [{}] (retried {} times): {:?}", task.show_name, max_retries, e);
+                eprintln!(
+                    "Download failed [{}] (retried {} times): {:?}",
+                    task.show_name, max_retries, e
+                );
             }
             last_error
         };
 
         let mut end_data = HashMap::new();
         end_data.insert("URL".to_string(), serde_json::Value::String(task.url));
-        end_data.insert("SavePath".to_string(), serde_json::Value::String(task.save_path));
-        end_data.insert("ShowName".to_string(), serde_json::Value::String(task.show_name.clone()));
-        end_data.insert("Index".to_string(), serde_json::Value::Number(serde_json::Number::from(index + 1)));
-        end_data.insert("Total".to_string(), serde_json::Value::Number(serde_json::Number::from(total)));
+        end_data.insert(
+            "SavePath".to_string(),
+            serde_json::Value::String(task.save_path),
+        );
+        end_data.insert(
+            "ShowName".to_string(),
+            serde_json::Value::String(task.show_name.clone()),
+        );
+        end_data.insert(
+            "Index".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(index + 1)),
+        );
+        end_data.insert(
+            "Total".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(total)),
+        );
 
         if let Some(e) = err {
             if !token.is_cancelled() {
@@ -519,7 +656,8 @@ impl HSDownloader {
                 let error_msg = format!("Download failed: {}", Self::format_error(&e));
                 error_data.insert("Error".to_string(), serde_json::Value::String(error_msg));
 
-                let _ = send_message(error_event, error_data, &config, &ws_client, &socket_client).await;
+                let _ = send_message(error_event, error_data, &config, &ws_client, &socket_client)
+                    .await;
             }
         }
 
@@ -542,7 +680,8 @@ impl HSDownloader {
         } else if error_str.contains("status code: 504") {
             return "Server returned 504 Gateway Timeout - server response timeout, please check network or retry later".to_string();
         } else if error_str.contains("status code: 404") {
-            return "Server returned 404 Not Found - file does not exist or link has expired".to_string();
+            return "Server returned 404 Not Found - file does not exist or link has expired"
+                .to_string();
         } else if error_str.contains("status code: 403") {
             return "Server returned 403 Forbidden - no access permission, may require authentication or proxy".to_string();
         } else if error_str.contains("Connection refused") {
@@ -552,7 +691,8 @@ impl HSDownloader {
         } else if error_str.contains("Timeout") || error_str.contains("timed out") {
             return "Request timeout - network connection timeout, please check network status or retry later".to_string();
         } else if error_str.contains("No route to host") {
-            return "No route to host - please check network connection or target address".to_string();
+            return "No route to host - please check network connection or target address"
+                .to_string();
         } else if error_str.contains("StorageFull") || error_str.contains("No space left") {
             return "Insufficient disk space - please free up disk space and retry".to_string();
         } else if error_str.contains("Permission denied") {
@@ -578,9 +718,19 @@ impl HSDownloader {
         };
 
         let mut data = HashMap::new();
-        data.insert("Text".to_string(), serde_json::Value::String("Download paused".to_string()));
+        data.insert(
+            "Text".to_string(),
+            serde_json::Value::String("Download paused".to_string()),
+        );
 
-        let _ = send_message(event, data, &self.config, &self.ws_client, &self.socket_client).await;
+        let _ = send_message(
+            event,
+            data,
+            &self.config,
+            &self.ws_client,
+            &self.socket_client,
+        )
+        .await;
     }
 
     pub async fn resume_download(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -611,9 +761,19 @@ impl HSDownloader {
         };
 
         let mut data = HashMap::new();
-        data.insert("Text".to_string(), serde_json::Value::String("Download stopped".to_string()));
+        data.insert(
+            "Text".to_string(),
+            serde_json::Value::String("Download stopped".to_string()),
+        );
 
-        send_message(event, data, &self.config, &self.ws_client, &self.socket_client).await?;
+        send_message(
+            event,
+            data,
+            &self.config,
+            &self.ws_client,
+            &self.socket_client,
+        )
+        .await?;
 
         Ok(())
     }

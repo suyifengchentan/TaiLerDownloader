@@ -1,9 +1,9 @@
+use super::downloader::{DownloadConfig, DownloadTask, Event, EventType, HSDownloader, UA};
+use super::license_output::output_license_once;
+use super::send_message::send_message;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
-use super::downloader::{HSDownloader, DownloadTask, DownloadConfig, Event, EventType, UA};
-use super::send_message::send_message;
-use super::license_output::output_license_once;
 
 lazy_static::lazy_static! {
     static ref RUNTIME: tokio::runtime::Runtime = tokio::runtime::Builder::new_multi_thread()
@@ -41,11 +41,15 @@ pub extern "C" fn start_download(
     output_license_once();
 
     if tasks_data.is_null() || task_count <= 0 {
-        eprintln!("无效参数: tasks_data={:?}, task_count={}", tasks_data, task_count);
+        eprintln!(
+            "无效参数: tasks_data={:?}, task_count={}",
+            tasks_data, task_count
+        );
         return -1;
     }
 
-    let tasks_str = unsafe { std::ffi::CStr::from_ptr(tasks_data as *const u8 as *const std::ffi::c_char) };
+    let tasks_str =
+        unsafe { std::ffi::CStr::from_ptr(tasks_data as *const u8 as *const std::ffi::c_char) };
     let tasks_json = match tasks_str.to_str() {
         Ok(s) => s,
         Err(e) => {
@@ -63,7 +67,9 @@ pub extern "C" fn start_download(
     };
 
     let callback_url = if !remote_callback_url.is_null() {
-        let url_str = unsafe { std::ffi::CStr::from_ptr(remote_callback_url as *const u8 as *const std::ffi::c_char) };
+        let url_str = unsafe {
+            std::ffi::CStr::from_ptr(remote_callback_url as *const u8 as *const std::ffi::c_char)
+        };
         match url_str.to_str() {
             Ok(s) if !s.is_empty() => Some(s.to_string()),
             _ => None,
@@ -86,17 +92,23 @@ pub extern "C" fn start_download(
 
     let callback_func = if callback != 0 {
         unsafe {
-            Some(std::mem::transmute::<usize, super::downloader::ProgressCallback>(callback))
+            Some(std::mem::transmute::<
+                usize,
+                super::downloader::ProgressCallback,
+            >(callback))
         }
     } else {
         None
     };
 
     let global_headers = if !headers_json.is_null() {
-        let headers_str = unsafe { std::ffi::CStr::from_ptr(headers_json as *const u8 as *const std::ffi::c_char) };
+        let headers_str = unsafe {
+            std::ffi::CStr::from_ptr(headers_json as *const u8 as *const std::ffi::c_char)
+        };
         match headers_str.to_str() {
             Ok(s) if !s.is_empty() => {
-                serde_json::from_str::<std::collections::HashMap<String, String>>(s).unwrap_or_default()
+                serde_json::from_str::<std::collections::HashMap<String, String>>(s)
+                    .unwrap_or_default()
             }
             _ => std::collections::HashMap::new(),
         }
@@ -119,6 +131,8 @@ pub extern "C" fn start_download(
         max_retry_delay_ms: 30000,
         speed_limit_bps: 0,
         proxy_url: None,
+        ed2k_gateways: super::downloader::default_ed2k_gateways(),
+        torrent_trackers: super::downloader::default_torrent_trackers(),
         headers: global_headers,
     };
 
@@ -138,7 +152,11 @@ pub extern "C" fn start_download(
     let downloader_clone = downloader.clone();
     RUNTIME.spawn(async move {
         let result = if is_multiple_val {
-            downloader_clone.read().await.start_multiple_downloads().await
+            downloader_clone
+                .read()
+                .await
+                .start_multiple_downloads()
+                .await
         } else {
             downloader_clone.read().await.start_download().await
         };
@@ -152,7 +170,10 @@ pub extern "C" fn start_download(
             };
 
             let mut data = HashMap::new();
-            data.insert("Error".to_string(), serde_json::Value::String(e.to_string()));
+            data.insert(
+                "Error".to_string(),
+                serde_json::Value::String(e.to_string()),
+            );
 
             let config = downloader_clone.read().await.config.clone();
             let ws_client = downloader_clone.read().await.ws_client.clone();
@@ -187,7 +208,8 @@ pub extern "C" fn get_downloader(
         return -1;
     }
 
-    let tasks_str = unsafe { std::ffi::CStr::from_ptr(tasks_data as *const u8 as *const std::ffi::c_char) };
+    let tasks_str =
+        unsafe { std::ffi::CStr::from_ptr(tasks_data as *const u8 as *const std::ffi::c_char) };
     let tasks_json = match tasks_str.to_str() {
         Ok(s) => s,
         Err(_) => return -1,
@@ -199,7 +221,9 @@ pub extern "C" fn get_downloader(
     };
 
     let callback_url = if !remote_callback_url.is_null() {
-        let url_str = unsafe { std::ffi::CStr::from_ptr(remote_callback_url as *const u8 as *const std::ffi::c_char) };
+        let url_str = unsafe {
+            std::ffi::CStr::from_ptr(remote_callback_url as *const u8 as *const std::ffi::c_char)
+        };
         match url_str.to_str() {
             Ok(s) if !s.is_empty() => Some(s.to_string()),
             _ => None,
@@ -216,17 +240,23 @@ pub extern "C" fn get_downloader(
 
     let callback_func = if callback != 0 {
         unsafe {
-            Some(std::mem::transmute::<usize, super::downloader::ProgressCallback>(callback))
+            Some(std::mem::transmute::<
+                usize,
+                super::downloader::ProgressCallback,
+            >(callback))
         }
     } else {
         None
     };
 
     let global_headers = if !headers_json.is_null() {
-        let headers_str = unsafe { std::ffi::CStr::from_ptr(headers_json as *const u8 as *const std::ffi::c_char) };
+        let headers_str = unsafe {
+            std::ffi::CStr::from_ptr(headers_json as *const u8 as *const std::ffi::c_char)
+        };
         match headers_str.to_str() {
             Ok(s) if !s.is_empty() => {
-                serde_json::from_str::<std::collections::HashMap<String, String>>(s).unwrap_or_default()
+                serde_json::from_str::<std::collections::HashMap<String, String>>(s)
+                    .unwrap_or_default()
             }
             _ => std::collections::HashMap::new(),
         }
@@ -249,6 +279,8 @@ pub extern "C" fn get_downloader(
         max_retry_delay_ms: 30000,
         speed_limit_bps: 0,
         proxy_url: None,
+        ed2k_gateways: super::downloader::default_ed2k_gateways(),
+        torrent_trackers: super::downloader::default_torrent_trackers(),
         headers: global_headers,
     };
 
@@ -291,7 +323,10 @@ pub extern "C" fn start_download_id(id: i32) -> i32 {
                     };
 
                     let mut data = HashMap::new();
-                    data.insert("Error".to_string(), serde_json::Value::String(e.to_string()));
+                    data.insert(
+                        "Error".to_string(),
+                        serde_json::Value::String(e.to_string()),
+                    );
 
                     let config = d_clone.read().await.config.clone();
                     let ws_client = d_clone.read().await.ws_client.clone();
@@ -332,7 +367,10 @@ pub extern "C" fn start_multiple_downloads_id(id: i32) -> i32 {
                     };
 
                     let mut data = HashMap::new();
-                    data.insert("Error".to_string(), serde_json::Value::String(e.to_string()));
+                    data.insert(
+                        "Error".to_string(),
+                        serde_json::Value::String(e.to_string()),
+                    );
 
                     let config = d_clone.read().await.config.clone();
                     let ws_client = d_clone.read().await.ws_client.clone();
@@ -379,9 +417,7 @@ pub extern "C" fn resume_download(id: i32) -> i32 {
 
     match downloader {
         Some(d) => {
-            let result = RUNTIME.block_on(async {
-                d.read().await.resume_download().await
-            });
+            let result = RUNTIME.block_on(async { d.read().await.resume_download().await });
             match result {
                 Ok(_) => 0,
                 Err(_) => -1,
@@ -401,9 +437,7 @@ pub extern "C" fn stop_download(id: i32) -> i32 {
 
     match downloader {
         Some(d) => {
-            let result = RUNTIME.block_on(async {
-                d.read().await.stop_download().await
-            });
+            let result = RUNTIME.block_on(async { d.read().await.stop_download().await });
             match result {
                 Ok(_) => 0,
                 Err(_) => -1,
@@ -444,7 +478,9 @@ pub extern "C" fn set_proxy(id: i32, proxy_url: *const i8) -> i32 {
     match downloader {
         Some(d) => {
             let proxy = if !proxy_url.is_null() {
-                let url_str = unsafe { std::ffi::CStr::from_ptr(proxy_url as *const u8 as *const std::ffi::c_char) };
+                let url_str = unsafe {
+                    std::ffi::CStr::from_ptr(proxy_url as *const u8 as *const std::ffi::c_char)
+                };
                 match url_str.to_str() {
                     Ok(s) if !s.is_empty() => Some(s.to_string()),
                     _ => None,
@@ -464,7 +500,12 @@ pub extern "C" fn set_proxy(id: i32, proxy_url: *const i8) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn set_retry_config(id: i32, max_retries: u32, retry_delay_ms: u64, max_retry_delay_ms: u64) -> i32 {
+pub extern "C" fn set_retry_config(
+    id: i32,
+    max_retries: u32,
+    retry_delay_ms: u64,
+    max_retry_delay_ms: u64,
+) -> i32 {
     output_license_once();
 
     let downloaders = get_downloaders().lock().unwrap();
@@ -496,9 +537,7 @@ pub extern "C" fn get_performance_stats(id: i32) -> *mut std::ffi::c_char {
 
     match downloader {
         Some(d) => {
-            let stats = RUNTIME.block_on(async {
-                d.read().await.get_snapshot("").await
-            });
+            let stats = RUNTIME.block_on(async { d.read().await.get_snapshot("").await });
 
             match stats {
                 Some(s) => {

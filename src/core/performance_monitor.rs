@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Instant;
 use tokio::sync::RwLock;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 pub struct PerformanceMonitor {
     start_time: Instant,
@@ -115,18 +115,65 @@ impl PerformanceMonitor {
         let total_expected = self.total_expected_bytes.load(Ordering::Relaxed);
 
         let mut stats = HashMap::new();
-        stats.insert("total_bytes".to_string(), serde_json::Value::Number(serde_json::Number::from(total_bytes)));
-        stats.insert("Total".to_string(), serde_json::Value::Number(serde_json::Number::from(total_expected)));
-        stats.insert("current_speed_bps".to_string(), serde_json::Value::Number(serde_json::Number::from(current_speed as i64)));
-        stats.insert("current_speed_mbps".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(current_speed / (1024.0 * 1024.0)).unwrap_or(serde_json::Number::from(0))));
-        stats.insert("average_speed_bps".to_string(), serde_json::Value::Number(serde_json::Number::from(average_speed as i64)));
-        stats.insert("average_speed_mbps".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(average_speed / (1024.0 * 1024.0)).unwrap_or(serde_json::Number::from(0))));
-        stats.insert("peak_speed_bps".to_string(), serde_json::Value::Number(serde_json::Number::from(peak_speed as i64)));
-        stats.insert("peak_speed_mbps".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(peak_speed / (1024.0 * 1024.0)).unwrap_or(serde_json::Number::from(0))));
-        stats.insert("chunk_downloads".to_string(), serde_json::Value::Number(serde_json::Number::from(chunk_downloads)));
-        stats.insert("failed_chunks".to_string(), serde_json::Value::Number(serde_json::Number::from(failed_chunks)));
-        stats.insert("retried_chunks".to_string(), serde_json::Value::Number(serde_json::Number::from(retried_chunks)));
-        stats.insert("elapsed_time".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(elapsed_time).unwrap_or(serde_json::Number::from(0))));
+        stats.insert(
+            "total_bytes".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(total_bytes)),
+        );
+        stats.insert(
+            "Total".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(total_expected)),
+        );
+        stats.insert(
+            "current_speed_bps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(current_speed as i64)),
+        );
+        stats.insert(
+            "current_speed_mbps".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(current_speed / (1024.0 * 1024.0))
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+        stats.insert(
+            "average_speed_bps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(average_speed as i64)),
+        );
+        stats.insert(
+            "average_speed_mbps".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(average_speed / (1024.0 * 1024.0))
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+        stats.insert(
+            "peak_speed_bps".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(peak_speed as i64)),
+        );
+        stats.insert(
+            "peak_speed_mbps".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(peak_speed / (1024.0 * 1024.0))
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+        stats.insert(
+            "chunk_downloads".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(chunk_downloads)),
+        );
+        stats.insert(
+            "failed_chunks".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(failed_chunks)),
+        );
+        stats.insert(
+            "retried_chunks".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(retried_chunks)),
+        );
+        stats.insert(
+            "elapsed_time".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(elapsed_time).unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
 
         stats
     }
@@ -162,12 +209,15 @@ impl PerformanceMonitor {
     }
 }
 
-static GLOBAL_MONITOR: tokio::sync::OnceCell<Arc<PerformanceMonitor>> = tokio::sync::OnceCell::const_new();
+static GLOBAL_MONITOR: tokio::sync::OnceCell<Arc<PerformanceMonitor>> =
+    tokio::sync::OnceCell::const_new();
 
 pub async fn get_global_monitor() -> Option<Arc<PerformanceMonitor>> {
-    GLOBAL_MONITOR.get_or_init(|| async {
-        Arc::new(PerformanceMonitor::new())
-    }).await.clone().into()
+    GLOBAL_MONITOR
+        .get_or_init(|| async { Arc::new(PerformanceMonitor::new()) })
+        .await
+        .clone()
+        .into()
 }
 
 pub fn get_global_monitor_blocking() -> Option<Arc<PerformanceMonitor>> {
